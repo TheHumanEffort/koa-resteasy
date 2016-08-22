@@ -1,6 +1,4 @@
-var Router = require('koa-router');
 var queries = require('./queries');
-
 var _ = require('lodash');
 
 // get and sanitize table:
@@ -14,8 +12,6 @@ function count(query, ctx) {
 
 function *prepare(next) {
   var resteasy = this.resteasy;
-
-  console.error('RESTEASY: ' + JSON.stringify(resteasy) + '.');
 
   resteasy.table = (resteasy.options && resteasy.options.table) || table(this);
   if (resteasy.options.tableBlacklist) {
@@ -73,6 +69,7 @@ function *create(next) {
 }
 
 function *read(next) {
+  console.error('READING');
   queries.read(this.resteasy.query, this.params.id, this.resteasy.table);
 
   yield next;
@@ -97,39 +94,84 @@ function *destroy(next) {
   this.body = { success: !!res };
 }
 
-function Resteasy(knex, options) {
-  // prepare the environment
+const HAS_ID_RE = /\/(\d+)$/;
+const TABLE_RE = /\/([^\/]+?)\/?(?:(\d+))?$/;
 
+function getId(path) {
+  var m = path.match(HAS_ID_RE);
+  if (m) return m[1];
+  return null;
+}
+
+function getTable(path) {
+  var m = path.match(TABLE_RE);
+  if (m) return m[1];
+  return null;
+}
+
+function Resteasy(knex, options) {
   options = options || {};
   options.tableBlacklist = _.union(options.tableBlacklist || [], [/^pg_.*$/, /^information_schema\..*$/]);
 
-  var router = new Router();
+  // smart 'router' function, that determines what the intended action
+  // is, and what can be done in order to prepare for and execute this
+  // action:
+  //
+  // It looks at method and path in order to best determine what needs
+  // to happen.  In the future, it may additionally look at
+  // relationships so that you can have more literate URLs like:
+  //
+  // /users/6/playlists?order=+modified_at
+  //
+  // GET /:table or GET / -> index
+  // POST /:table or POST / -> create
+  // GET /:table/:id or GET /:id -> read
+  // PUT or PATCH /:table/:id or /:id -> update
+  // DELETE /:table/:id or /:id -> destroy
+  //
 
-  router.use(function *(next) {
-    this.resteasy = { options: options };
-    this.resteasy.knex = knex;
-    yield next;
-  });
+  return function*(next) {
+    var id = getId(this.path);
+    var table = getTable(this.path);
 
-  router.use(prepare);
+    console.error('path: ', this.path);
+    console.error('Id: ', id);
+    console.error('Table: ', table);
 
-  if (options.table) {
-    router.post('/', create);
-    router.put('/:id', update);
-    router.patch('/:id', update);
-    router.get('/', index);
-    router.get('/:id', read);
-    router.delete('/:id', destroy);
-  } else {
-    router.post('/:table', create);
-    router.put('/:table/:id', update);
-    router.patch('/:table/:id', update);
-    router.get('/:table', index);
-    router.get('/:table/:id', read);
-    router.delete('/:table/:id', destroy);
-  }
+    this.params = { id, table };
 
-  return router.routes();
+    var operation = null;
+
+    switch (this.method) {
+    case 'GET':
+      if (id) operation = read;
+      else operation = index;
+
+      break;
+    case 'POST':
+    case 'PUT':
+    case 'PATCH':
+      if (id) operation = update;
+      else operation = create;
+
+      break;
+    case 'DELETE':
+      if (id) operation = destroy;
+
+      break;
+    }
+
+    // if it's a valid operaiton, perform it:
+    if (operation) {
+      this.resteasy = { options: options };
+      this.resteasy.knex = knex;
+
+      yield prepare.call(this, operation.call(this, next));
+    } else {
+      // if it is not, just pass on through:
+      yield next;
+    }
+  };
 };
 
 module.exports = function(knex, options) {
