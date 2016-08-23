@@ -10,7 +10,7 @@ module.exports = {
                     'tc.constraint_name, tc.table_name, kcu.column_name,\n' +
                     'ccu.table_name AS foreign_table_name,\n' +
                     'ccu.column_name AS foreign_column_name,\n' +
-                    'CASE pgc.confdeltype,\n' +
+                    'CASE pgc.confdeltype\n' +
                     'WHEN \'a\' THEN \'NO ACTION\'\n' +
                     'WHEN \'r\' THEN \'RESTRICT\'\n' +
                     'WHEN \'c\' THEN \'CASCADE\'\n' +
@@ -32,6 +32,43 @@ module.exports = {
                     'ON pgc.conname = kcu.constraint_name\n' +
                     'JOIN information_schema.constraint_column_usage AS ccu\n' +
                     'ON ccu.constraint_name = tc.constraint_name\n' +
-                    'WHERE constraint_type = \'FOREIGN KEY\' AND tc.table_name=?;', table);
+                    'WHERE constraint_type = \'FOREIGN KEY\' AND ( tc.table_name=:table OR ccu.table_name=:table );', { table });
+  },
+
+  relations: function *(knex, table) {
+    var constraints = (yield this.constraints(knex, table)).rows;
+
+    var relations = {};
+
+    for (var i = 0; i < constraints.length; i++) {
+      var constraint = constraints[i];
+      console.error('COnstraint for ' + table + ' ', constraint);
+
+      if (constraint.foreign_table_name == table) {
+        // hasMany
+        relations[constraint.table_name] = {
+          type: 'hasMany',
+          foreignColumn: constraint.column_name,
+          foreignTable: constraint.table_name,
+          column: constraint.foreign_column_name,
+          onDelete: constraint.on_delete,
+          onUpdate: constraint.on_update,
+        };
+      } else if (constraint.table_name == table) {
+        // belongsTo
+        var name = constraint.column_name.match(/^(.*?)_id$/)[1];
+        relations[name] = {
+          type: 'belongsTo',
+          foreignColumn: constraint.foreign_column_name,
+          foreignTable: constraint.foreign_table_name,
+          column: constraint.column_name,
+          onDelete: constraint.on_delete,
+          onUpdate: constraint.on_update,
+        };
+      }
+
+    }
+
+    return relations;
   },
 };

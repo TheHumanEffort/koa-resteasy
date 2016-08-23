@@ -1,4 +1,6 @@
 var queries = require('./queries');
+var schema = require('./schema');
+
 var _ = require('lodash');
 
 // get and sanitize table:
@@ -8,6 +10,26 @@ function table(context) {
 
 function count(query, ctx) {
   return query.count('*');
+}
+
+function applyContext(query, table, constraints, context) {
+  for (var i = 0; i < constraints.length; i++) {
+    var constraint = constraints[i];
+
+    var contextTable = getTable(context);
+    var contextId = getId(context);
+
+    console.error(constraint.table_name, table, constraint.foreign_table_name, contextTable);
+    if (constraint.table_name == table && constraint.foreign_table_name == contextTable) {
+      // has_many to constraint.foreign_table_name
+      /*      query = query.leftJoin(contextTable,
+              constraint.foreign_table_name + '.' + constraint.foreign_column_name,
+              constraint.table_name + '.' + constraint.column_name); */
+      query = query.where(constraint.column_name, contextId);
+    }
+  }
+
+  return query;
 }
 
 function *prepare(next) {
@@ -23,6 +45,9 @@ function *prepare(next) {
 
   resteasy.query = resteasy.knex(resteasy.table);
 
+  var constraints = (yield schema.constraints(resteasy.knex, resteasy.table)).rows;
+  resteasy.query = applyContext(resteasy.query, resteasy.table, constraints, this.params.context);
+
   resteasy.query.on('query-response', function(rows, res, builder) {
     resteasy.pgRes = res;
   });
@@ -31,12 +56,13 @@ function *prepare(next) {
 
   // only execute the query if the behavior is default:
   if (resteasy.query) {
+    var sql = yield resteasy.query.toSQL();
     var res = yield resteasy.query;
 
     if (resteasy.isCollection)
-      this.body = { result: res, meta: { count: resteasy.count, pg: resteasy.pgRes } };
+      this.body = { result: res, meta: { count: resteasy.count, constraints: (yield schema.constraints(resteasy.knex, resteasy.table)).rows, sql: sql } };
     else
-      this.body = { result: res[0], meta: {  pg: resteasy.pgRes } };
+      this.body = { result: res[0], meta: {  } };
   }
 }
 
@@ -69,7 +95,6 @@ function *create(next) {
 }
 
 function *read(next) {
-  console.error('READING');
   queries.read(this.resteasy.query, this.params.id, this.resteasy.table);
 
   yield next;
@@ -95,7 +120,9 @@ function *destroy(next) {
 }
 
 const HAS_ID_RE = /\/(\d+)$/;
-const TABLE_RE = /\/([^\/]+?)\/?(?:(\d+))?$/;
+const TABLE_RE = /\/?([^\/]+?)\/?(?:(\d+))?$/;
+
+const CONTEXT_RE = /^\/(?:api\/)?(?:v\d+\/)?(.*?)\/([^\/]+?)\/?(?:(\d+))?$/;
 
 function getId(path) {
   var m = path.match(HAS_ID_RE);
@@ -105,6 +132,12 @@ function getId(path) {
 
 function getTable(path) {
   var m = path.match(TABLE_RE);
+  if (m) return m[1];
+  return null;
+}
+
+function getContext(path) {
+  var m = path.match(CONTEXT_RE);
   if (m) return m[1];
   return null;
 }
@@ -133,12 +166,10 @@ function Resteasy(knex, options) {
   return function*(next) {
     var id = getId(this.path);
     var table = getTable(this.path);
+    var context = getContext(this.path);
+    console.error('CONTEXT: ' + context);
 
-    console.error('path: ', this.path);
-    console.error('Id: ', id);
-    console.error('Table: ', table);
-
-    this.params = { id, table };
+    this.params = { id, table, context };
 
     var operation = null;
 
