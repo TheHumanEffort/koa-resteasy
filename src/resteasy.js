@@ -83,9 +83,9 @@ function *prepare(next) {
         }
 
         if (resteasy.isCollection)
-          ctx.body = { result: res, meta: { count: resteasy.count, columns: (yield resteasy.schema.columns(resteasy.table)), sql: sql } };
+          ctx.body = res;
         else
-          ctx.body = { result: res[0], meta: {  } };
+          ctx.body = res[0];
       }
     });
   });
