@@ -25,12 +25,18 @@ module.exports = {
   },
 
   whereFromHash: function(query, hash) {
+    console.error('WHERE FROM HASH: ', hash);
     _.each(hash, function(value, key) {
 
-      if (value.match(/^\-?[0-9.\-Ee]+$/))
+      if (value.match(/^NULL$/)) {
+        query = query.where(key, 'IS', null);
+      } else if (value.match(/^!NULL$/)) {
+        query = query.where(key, 'IS NOT', null);
+      } else if (value.match(/^\-?[0-9.\-Ee]+$/)) {
         query = query.where(key, '=', Number(value));
-      else
+      } else {
         query = query.where(key, 'ILIKE', value);
+      }
     });
 
     return query;
