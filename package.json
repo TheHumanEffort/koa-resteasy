@@ -1,6 +1,6 @@
 {
   "name": "koa-resteasy",
-  "version": "1.0.0-alpha.5",
+  "version": "1.0.0-alpha.6",
   "description": "REST endpoint middleware for Koa & Knex, currently only supports Koa 1 and Postgres.",
   "main": "index.js",
   "scripts": {
@@ -22,6 +22,7 @@
   },
   "homepage": "https://github.com/TheHumanEffort/koa-resteasy#readme",
   "dependencies": {
+    "co": "^4.6.0",
     "koa-router": "^5.4.0",
     "lodash": "^4.15.0"
   }

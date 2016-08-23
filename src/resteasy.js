@@ -1,6 +1,6 @@
 var queries = require('./queries');
 var Schema = require('./schema');
-
+var co = require('co');
 var _ = require('lodash');
 
 // get and sanitize table:
@@ -42,6 +42,8 @@ function applyContext(ctx, query) {
 }
 
 function *prepare(next) {
+  var _this = this;
+  var ctx = _this;
   var resteasy = this.resteasy;
 
   resteasy.table = (resteasy.options && resteasy.options.table) || table(this);
@@ -52,27 +54,37 @@ function *prepare(next) {
     }
   }
 
-  resteasy.query = resteasy.knex(resteasy.table);
+  yield resteasy.knex.transaction(function(trx) {
+    resteasy.transaction = trx;
+    resteasy.query = trx(resteasy.table);
 
-  var constraints = resteasy.constraints = (yield resteasy.schema.constraints(resteasy.table));
-  resteasy.query = applyContext(this, resteasy.query);
+    return co(function *() {
+      var constraints = resteasy.constraints = yield resteasy.schema.constraints(resteasy.table);
+      resteasy.query = applyContext(ctx, resteasy.query);
 
-  resteasy.query.on('query-response', function(rows, res, builder) {
-    resteasy.pgRes = res;
+      resteasy.query.on('query-response', function(rows, res, builder) {
+        resteasy.pgRes = res;
+      });
+
+      yield next;
+
+      // only execute the query if the behavior is default:
+      if (resteasy.query) {
+        var sql = yield resteasy.query.toSQL();
+
+        var res = yield resteasy.query;
+
+        if (resteasy.queries) {
+          yield resteasy.queries;
+        }
+
+        if (resteasy.isCollection)
+          ctx.body = { result: res, meta: { count: resteasy.count, columns: (yield resteasy.schema.columns(resteasy.table)), sql: sql } };
+        else
+          ctx.body = { result: res[0], meta: {  } };
+      }
+    });
   });
-
-  yield next;
-
-  // only execute the query if the behavior is default:
-  if (resteasy.query) {
-    var sql = yield resteasy.query.toSQL();
-    var res = yield resteasy.query;
-
-    if (resteasy.isCollection)
-      this.body = { result: res, meta: { count: resteasy.count, columns: (yield resteasy.schema.columns(resteasy.table)), sql: sql } };
-    else
-      this.body = { result: res[0], meta: {  } };
-  }
 }
 
 const IGNORED_QUERIES = ['fields', 'order', 'limit', 'offset'];

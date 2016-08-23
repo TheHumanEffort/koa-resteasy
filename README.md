@@ -7,6 +7,10 @@ REST endpoint middleware for Koa &amp; Knex, currently only supports Koa 1 and P
 npm install --save koa-resteasy
 ```
 
+### TODO:
+
+- has-and-belongs-to-many/join table support (e.g. /api/playlists/5/tracks)
+
 ### Example:
 ```
 var app = require('koa')();
