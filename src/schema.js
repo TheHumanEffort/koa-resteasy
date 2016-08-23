@@ -2,7 +2,7 @@
 
 module.exports = {
   columns: function(knex, table) {
-    return knex.raw('SELECT table_name,column_name,dpata_type FROM information_schema.columns WHERE table_name   = ?', table);
+    return knex.raw('SELECT table_name,column_name,data_type FROM information_schema.columns WHERE table_name   = ?', table);
   },
 
   constraints: function(knex, table) {
