@@ -126,7 +126,9 @@ function *hook(ctx, hookName/*, ... args */) {
 
 function *index(next) {
   // drop ignored queries:
-  var hash = _.reject(this.query, function(value, key) { return _.includes(IGNORED_QUERIES, key); });
+  var hash = _.clone(this.query);
+
+  _.each(IGNORED_QUERIES, function(ignored) { delete hash[ignored]; });
 
   var query = queries.whereFromHash(this.resteasy.query, hash);
 
