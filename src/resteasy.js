@@ -57,6 +57,7 @@ function *prepare(next) {
   yield resteasy.knex.transaction(function(trx) {
     resteasy.transaction = trx;
     resteasy.query = trx(resteasy.table);
+    resteasy.queries = [];
 
     return co(function *() {
       var constraints = resteasy.constraints = yield resteasy.schema.constraints(resteasy.table);
