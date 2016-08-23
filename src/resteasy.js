@@ -1,5 +1,5 @@
 var queries = require('./queries');
-var schema = require('./schema');
+var Schema = require('./schema');
 
 var _ = require('lodash');
 
@@ -12,24 +12,33 @@ function count(query, ctx) {
   return query.count('*');
 }
 
-function applyContext(query, table, constraints, context) {
-  for (var i = 0; i < constraints.length; i++) {
-    var constraint = constraints[i];
+// calculate implied fields, e.g: api/users/4/playlists means the
+// playlist has a user_id = 4 (based on the foreign keys in the DB).
 
+function impliedHash(ctx) {
+  var constraints = ctx.resteasy.constraints;
+  var context = ctx.params.context;
+  var table = ctx.resteasy.table;
+  var hash = {};
+
+  _.each(constraints, function(constraint) {
     var contextTable = getTable(context);
     var contextId = getId(context);
 
     console.error(constraint.table_name, table, constraint.foreign_table_name, contextTable);
     if (constraint.table_name == table && constraint.foreign_table_name == contextTable) {
-      // has_many to constraint.foreign_table_name
-      /*      query = query.leftJoin(contextTable,
-              constraint.foreign_table_name + '.' + constraint.foreign_column_name,
-              constraint.table_name + '.' + constraint.column_name); */
-      query = query.where(constraint.column_name, contextId);
+      hash[constraint.column_name] = contextId;
     }
-  }
+  });
 
-  return query;
+  return hash;
+}
+
+function applyContext(ctx, query) {
+  // simple hash assumption logic:
+  // api/users/4/playlists is playlists where user_id = 4
+  var hash = impliedHash(ctx);
+  return queries.whereFromHash(query, hash);
 }
 
 function *prepare(next) {
@@ -45,8 +54,8 @@ function *prepare(next) {
 
   resteasy.query = resteasy.knex(resteasy.table);
 
-  var constraints = (yield schema.constraints(resteasy.knex, resteasy.table)).rows;
-  resteasy.query = applyContext(resteasy.query, resteasy.table, constraints, this.params.context);
+  var constraints = resteasy.constraints = (yield resteasy.schema.constraints(resteasy.table));
+  resteasy.query = applyContext(this, resteasy.query);
 
   resteasy.query.on('query-response', function(rows, res, builder) {
     resteasy.pgRes = res;
@@ -60,7 +69,7 @@ function *prepare(next) {
     var res = yield resteasy.query;
 
     if (resteasy.isCollection)
-      this.body = { result: res, meta: { count: resteasy.count, constraints: (yield schema.constraints(resteasy.knex, resteasy.table)).rows, sql: sql } };
+      this.body = { result: res, meta: { count: resteasy.count, columns: (yield resteasy.schema.columns(resteasy.table)), sql: sql } };
     else
       this.body = { result: res[0], meta: {  } };
   }
@@ -89,7 +98,21 @@ function *index(next) {
 }
 
 function *create(next) {
-  query.create(this.resteasy.query, this.request.body);
+  // add values implied by the route (e.g. api/users/3/playlists)
+  var implied = impliedHash(this);
+
+  var hash = _.extend({}, implied, this.body);
+
+  var columns = (yield this.resteasy.schema.columns(this.resteasy.table));
+  if (_.find(columns, { column_name: 'updated_at' })) {
+    hash['updated_at'] = this.resteasy.knex.fn.now();
+  }
+
+  if (_.find(columns, { column_name: 'created_at' })) {
+    hash['created_at'] = this.resteasy.knex.fn.now();
+  }
+
+  queries.create(this.resteasy.query, hash);
 
   yield next;
 }
@@ -101,7 +124,14 @@ function *read(next) {
 }
 
 function *update(next) {
-  queries.update(this.resteasy.query, this.params.id, this.request.body);
+  var hash = this.body;
+
+  var columns = (yield this.resteasy.schema.columns(this.resteasy.table));
+  if (_.find(columns, { column_name: 'updated_at' })) {
+    hash['updated_at'] = this.resteasy.knex.fn.now();
+  }
+
+  queries.update(this.resteasy.query, this.params.id, hash);
 
   yield next;
 }
@@ -145,6 +175,7 @@ function getContext(path) {
 function Resteasy(knex, options) {
   options = options || {};
   options.tableBlacklist = _.union(options.tableBlacklist || [], [/^pg_.*$/, /^information_schema\..*$/]);
+  var schema = Schema(knex);
 
   // smart 'router' function, that determines what the intended action
   // is, and what can be done in order to prepare for and execute this
@@ -167,7 +198,6 @@ function Resteasy(knex, options) {
     var id = getId(this.path);
     var table = getTable(this.path);
     var context = getContext(this.path);
-    console.error('CONTEXT: ' + context);
 
     this.params = { id, table, context };
 
@@ -196,6 +226,7 @@ function Resteasy(knex, options) {
     if (operation) {
       this.resteasy = { options: options };
       this.resteasy.knex = knex;
+      this.resteasy.schema = schema;
 
       yield prepare.call(this, operation.call(this, next));
     } else {
