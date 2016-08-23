@@ -74,8 +74,11 @@ function *prepare(next) {
 
         var res = yield resteasy.query;
 
+        yield hook(ctx, 'afterQuery', res);
+
         if (resteasy.queries) {
-          yield resteasy.queries;
+          var multires = yield resteasy.queries;
+          console.log(multires);
         }
 
         if (resteasy.isCollection)
@@ -88,6 +91,37 @@ function *prepare(next) {
 }
 
 const IGNORED_QUERIES = ['fields', 'order', 'limit', 'offset'];
+
+// hook calls look like:
+//
+// hooks: {
+//   beforeSave: [ function*(...args) ]
+// }
+//
+
+function *hook(ctx, hookName/*, ... args */) {
+  var allHooks = ctx.resteasy.options.hooks;
+  if (!allHooks) {
+    console.error('No hooks.');
+    return;
+  }
+
+  var scopedHooks = allHooks[hookName];
+  if (!scopedHooks) {
+    console.error('No scoped hooks.' + hookName);
+    return;
+  }
+
+  var args = Array.prototype.slice.call(arguments, 2);
+
+  if (typeof scopedHooks == 'function')
+    scopedHooks = [scopedHooks];
+
+  console.error(` ${scopedHooks.length} scoped hooks`);
+  for (var i = 0; i < scopedHooks.length; i++) {
+    yield scopedHooks[i].apply(ctx, args);
+  }
+}
 
 function *index(next) {
   // drop ignored queries:
@@ -106,6 +140,8 @@ function *index(next) {
 
   this.resteasy.isCollection = true;
 
+  yield hook(this, 'authorize', 'read', this.query);
+
   yield next;
 }
 
@@ -113,7 +149,7 @@ function *create(next) {
   // add values implied by the route (e.g. api/users/3/playlists)
   var implied = impliedHash(this);
 
-  var hash = _.extend({}, implied, this.body);
+  var hash = this.resteasy.object = _.extend({}, implied, this.body);
 
   var columns = (yield this.resteasy.schema.columns(this.resteasy.table));
   if (_.find(columns, { column_name: 'updated_at' })) {
@@ -124,26 +160,33 @@ function *create(next) {
     hash['created_at'] = this.resteasy.knex.fn.now();
   }
 
+  yield hook(this, 'beforeSave');
+  yield hook(this, 'authorize', 'create', hash);
+
   queries.create(this.resteasy.query, hash);
 
   yield next;
 }
 
 function *read(next) {
+  yield hook(this, 'authorize', 'read', this.params.id);
   queries.read(this.resteasy.query, this.params.id, this.resteasy.table);
 
   yield next;
 }
 
 function *update(next) {
-  var hash = this.body;
+  var hash = this.resteasy.object = this.body;
 
   var columns = (yield this.resteasy.schema.columns(this.resteasy.table));
   if (_.find(columns, { column_name: 'updated_at' })) {
     hash['updated_at'] = this.resteasy.knex.fn.now();
   }
 
-  queries.update(this.resteasy.query, this.params.id, hash);
+  yield hook(this, 'beforeSave');
+  yield hook(this, 'authorize', 'update', this.params.id);
+
+  queries.update(this.resteasy.query, this.params.id, this.resteasy.object);
 
   yield next;
 }
@@ -187,6 +230,7 @@ function getContext(path) {
 function Resteasy(knex, options) {
   options = options || {};
   options.tableBlacklist = _.union(options.tableBlacklist || [], [/^pg_.*$/, /^information_schema\..*$/]);
+
   var schema = Schema(knex);
 
   // smart 'router' function, that determines what the intended action
@@ -237,6 +281,7 @@ function Resteasy(knex, options) {
     // if it's a valid operaiton, perform it:
     if (operation) {
       this.resteasy = { options: options };
+      this.resteasy.operation = operation.name;
       this.resteasy.knex = knex;
       this.resteasy.schema = schema;
 
