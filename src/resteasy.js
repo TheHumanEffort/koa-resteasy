@@ -21,23 +21,25 @@ function impliedHash(ctx) {
   var table = ctx.resteasy.table;
   var hash = {};
 
-  _.each(constraints, function(constraint) {
-    var contextTable = getTable(context);
-    var contextId = getId(context);
+  if (context) {
+    _.each(constraints, function(constraint) {
+      var contextTable = getTable(context);
+      var contextId = getId(context);
 
-    console.error(constraint.table_name, table, constraint.foreign_table_name, contextTable);
-    if (constraint.table_name == table && constraint.foreign_table_name == contextTable) {
-      hash[constraint.column_name] = contextId;
-    }
-  });
+      console.error(constraint.table_name, table, constraint.foreign_table_name, contextTable);
+      if (constraint.table_name == table && constraint.foreign_table_name == contextTable) {
+        hash[constraint.column_name] = contextId;
+      }
+    });
+  }
 
   return hash;
 }
 
-function applyContext(ctx, query) {
+function applyContext(query) {
   // simple hash assumption logic:
   // api/users/4/playlists is playlists where user_id = 4
-  var hash = impliedHash(ctx);
+  var hash = impliedHash(this);
   return queries.whereFromHash(query, hash);
 }
 
@@ -61,7 +63,17 @@ function *prepare(next) {
 
     return co(function *() {
       var constraints = resteasy.constraints = yield resteasy.schema.constraints(resteasy.table);
-      resteasy.query = applyContext(ctx, resteasy.query);
+
+      var q;
+      if (resteasy.options.applyContext) {
+        q = resteasy.options.applyContext.call(ctx, resteasy.query);
+      }
+
+      if (q) {
+        resteasy.query = q;
+      } else {
+        resteasy.query = applyContext.call(ctx, resteasy.query);
+      }
 
       resteasy.query.on('query-response', function(rows, res, builder) {
         resteasy.pgRes = res;
