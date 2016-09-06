@@ -23,7 +23,6 @@
   "homepage": "https://github.com/TheHumanEffort/koa-resteasy#readme",
   "dependencies": {
     "co": "^4.6.0",
-    "koa-router": "^5.4.0",
     "lodash": "^4.15.0"
   }
 }
