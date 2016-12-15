@@ -24,34 +24,41 @@ function Schema(knex) {
     }),
 
     constraints: memoize(function *(table) {
-      var res = yield knex.raw('SELECT \n' +
-                      'tc.constraint_name, tc.table_name, kcu.column_name,\n' +
-                      'ccu.table_name AS foreign_table_name,\n' +
-                      'ccu.column_name AS foreign_column_name,\n' +
-                      'CASE pgc.confdeltype\n' +
-                      'WHEN \'a\' THEN \'NO ACTION\'\n' +
-                      'WHEN \'r\' THEN \'RESTRICT\'\n' +
-                      'WHEN \'c\' THEN \'CASCADE\'\n' +
-                      'WHEN \'n\' THEN \'SET NULL\'\n' +
-                      'WHEN \'d\' THEN \'SET DEFAULT\'\n' +
-                      'END AS on_delete,\n' +
-                      'CASE pgc.confupdtype\n' +
-                      'WHEN \'a\' THEN \'NO ACTION\'\n' +
-                      'WHEN \'r\' THEN \'RESTRICT\'\n' +
-                      'WHEN \'c\' THEN \'CASCADE\'\n' +
-                      'WHEN \'n\' THEN \'SET NULL\'\n' +
-                      'WHEN \'d\' THEN \'SET DEFAULT\'\n' +
-                      'END AS on_update\n' +
-                      'FROM \n' +
-                      'information_schema.table_constraints AS tc \n' +
-                      'JOIN information_schema.key_column_usage AS kcu\n' +
-                      'ON tc.constraint_name = kcu.constraint_name\n' +
-                      'JOIN pg_constraint AS pgc\n' +
-                      'ON pgc.conname = kcu.constraint_name\n' +
-                      'JOIN information_schema.constraint_column_usage AS ccu\n' +
-                      'ON ccu.constraint_name = tc.constraint_name\n' +
-                               'WHERE constraint_type = \'FOREIGN KEY\' AND ( tc.table_name=:table OR ccu.table_name=:table );', { table });
+       var query = "SELECT \n"+
+       "  conname as constraint_name,\n"+
+       "   conrelid::regclass AS table_name,\n"+
+       "   pga.attname as column_name,\n"+
+       "   confrelid::regclass as foreign_table_name,\n"+
+       "   pga2.attname as foreign_column_name,\n"+
+       "   CASE c.confdeltype\n"+
+       "     WHEN 'a' THEN 'NO ACTION'\n"+
+       "     WHEN 'r' THEN 'RESTRICT'\n"+
+       "     WHEN 'c' THEN 'CASCADE'\n"+
+       "     WHEN 'n' THEN 'SET NULL'\n"+
+       "     WHEN 'd' THEN 'SET DEFAULT'\n"+
+       "   END AS on_delete,\n"+
+       "   CASE c.confupdtype\n"+
+       "     WHEN 'a' THEN 'NO ACTION'\n"+
+       "     WHEN 'r' THEN 'RESTRICT'\n"+
+       "     WHEN 'c' THEN 'CASCADE'\n"+
+       "     WHEN 'n' THEN 'SET NULL'\n"+
+       "     WHEN 'd' THEN 'SET DEFAULT'\n"+
+       "   END AS on_update,\n"+
+       "   contype,\n"+
+       "   pg_get_constraintdef(c.oid) AS cdef\n"+
+       " FROM pg_constraint c, pg_namespace n, \n"+
+       " pg_attribute pga, pg_attribute pga2\n"+
+       " WHERE n.oid = c.connamespace\n"+
+       " AND contype IN ('f') \n"+
+       " AND n.nspname = 'public' \n"+
+       " AND conrelid::regclass::text IN ('"+ table +"') \n"+
+       " AND conrelid = pga.attrelid\n"+
+       " AND pga.attnum = conkey[1]\n"+
+       " AND confrelid = pga2.attrelid\n"+
+       " AND pga2.attnum = confkey[1]\n"+
+       " ORDER BY conrelid::regclass::text, contype DESC;"
 
+      var res = yield knex.raw(query);
       return res.rows;
     }),
 
