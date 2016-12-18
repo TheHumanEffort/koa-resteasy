@@ -175,8 +175,8 @@ function *create(next) {
     hash['created_at'] = this.resteasy.knex.fn.now();
   }
 
-  yield hook(this, 'beforeSave');
   yield hook(this, 'authorize', 'create', hash);
+  yield hook(this, 'beforeSave');
 
   queries.create(this.resteasy.query, hash);
 
@@ -198,8 +198,8 @@ function *update(next) {
     hash['updated_at'] = this.resteasy.knex.fn.now();
   }
 
-  yield hook(this, 'beforeSave');
   yield hook(this, 'authorize', 'update', this.params.id);
+  yield hook(this, 'beforeSave');
 
   queries.update(this.resteasy.query, this.params.id, this.resteasy.object);
 
